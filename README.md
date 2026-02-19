@@ -1,4 +1,4 @@
-# Stroboscopic Image Generator
+# Video2TrajectoryFigure: Visual Trajectory Extraction
 
 Generate a stroboscopic image from a video. This tool allows you to extract the moving parts of a video into a single image. This script can also download YouTube videos for processing.
 

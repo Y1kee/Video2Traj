@@ -1,0 +1,169 @@
+# ===========================
+# Operating System Files
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ===========================
+# Python
+# ===========================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# ===========================
+# IDEs and Editors
+# ===========================
+# VSCode
+.vscode/
+*.code-workspace
+
+# Cursor
+.cursorrules
+.cursorignore
+.cursor
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ===========================
+# LaTeX
+# ===========================
+# Auxiliary files
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+.*.lb
+
+# Bibliography auxiliary files
+*.bbl
+*.bcf
+*.blg
+*-blx.aux
+*-blx.bib
+*.run.xml
+
+# Build files
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+
+# Temporary folders
+diary/tmp/
+**/tmp/
+
+# ===========================
+# MATLAB
+# ===========================
+*.asv
+*.mex*
+slprj/
+
+# ===========================
+# Data and Results (optional)
+# ===========================
+# Uncomment if you don't want to track large data files
+# *.mat
+# *.csv
+# *.h5
+# *.hdf5
+
+# ===========================
+# Documentation
+# ===========================
+docs/_build/
+*.pdf
+
+# ===========================
+# Miscellaneous
+# ===========================
+*.bak
+*.tmp
+*.temp
+*~
+.directory

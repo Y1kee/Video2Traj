@@ -175,10 +175,9 @@ def generate_enhanced_stroboscopic_image(video_path, output_image_path, threshol
             if ret:
                 background_subtractor.apply(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
 
-    # Initialize result image with background
-    result_image = base_frame.astype(np.float32).copy()
-    # Track which pixels have been processed
-    processed_mask = np.zeros(base_frame.shape[:2], dtype=np.float32)
+    # Initialize accumulators
+    motion_accumulator = np.zeros_like(base_frame, dtype=np.float32)
+    weight_accumulator = np.zeros(base_frame.shape[:2], dtype=np.float32)
     
     prev_gray = base_gray.copy()
     frame_count = start_frame
@@ -211,22 +210,17 @@ def generate_enhanced_stroboscopic_image(video_path, output_image_path, threshol
         motion_intensity = np.sum(refined_mask) / (refined_mask.shape[0] * refined_mask.shape[1])
         
         if motion_intensity > 0.001:  # Only accumulate if there's significant motion
-            # Calculate alpha (opacity) based on time: earlier frames more transparent, later more opaque
+            # Non-linear weight increase with square root curve for better perceptual transparency
             total_frames_to_process = (end_frame - start_frame) / frame_interval
-            weight_min = 0.1
+            weight_min = 0.5
             weight_max = 1.0
-            alpha = weight_min + (weight_max - weight_min) * (processed_frames / total_frames_to_process) ** 0.5 if total_frames_to_process > 0 else 1.0
+            weight = weight_min + (weight_max - weight_min) * (processed_frames / total_frames_to_process) ** 0.5 if total_frames_to_process > 0 else 1.0
+            # weight = max(0.7, weight)  # Ensure minimum weight to avoid completely transparent early frames
             
-            # Alpha compositing: blend this frame's motion onto result image
-            motion_part = frame.astype(np.float32)
-            alpha_mask = (refined_mask / 255.0) * alpha
-            alpha_mask_3ch = np.stack([alpha_mask] * 3, axis=2)
-            
-            # Over operation: result = result * (1 - alpha) + motion * alpha
-            result_image = result_image * (1 - alpha_mask_3ch) + motion_part * alpha_mask_3ch
-            
-            # Track processed pixels
-            processed_mask = np.maximum(processed_mask, alpha_mask)
+            # Accumulate motion with intensity-based weighting
+            motion_part = frame.astype(np.float32) * mask_3ch
+            motion_accumulator += motion_part * weight
+            weight_accumulator += (refined_mask / 255.0) * weight
         
         prev_gray = current_gray
         processed_frames += 1
@@ -237,14 +231,27 @@ def generate_enhanced_stroboscopic_image(video_path, output_image_path, threshol
 
     print(f"Total processed frames: {processed_frames}")
 
-    # result_image already contains the composited result with proper alpha transparency
-    # Apply blend_ratio to control overall effect intensity
-    if blend_ratio < 1.0:
-        # Blend back with original background if blend_ratio < 1
-        result_image = base_frame.astype(np.float32) * (1 - blend_ratio) + result_image * blend_ratio
+    # Create final stroboscopic image
+    # Avoid division by zero
+    weight_accumulator_3ch = np.stack([weight_accumulator] * 3, axis=2)
+    valid_pixels = weight_accumulator_3ch > 0.1
+    
+    # Initialize result with base background
+    result = base_frame.astype(np.float32)
+    
+    # Blend accumulated motion where there was significant movement
+    motion_average = np.zeros_like(motion_accumulator)
+    motion_average[valid_pixels] = motion_accumulator[valid_pixels] / weight_accumulator_3ch[valid_pixels]
+    
+    # Adaptive blending - stronger blend where more motion occurred
+    adaptive_blend = np.clip(weight_accumulator / np.max(weight_accumulator) if np.max(weight_accumulator) > 0 else 0, 0, 1)
+    adaptive_blend_3ch = np.stack([adaptive_blend] * 3, axis=2)
+    
+    # Final composition
+    result = result * (1 - adaptive_blend_3ch * blend_ratio) + motion_average * adaptive_blend_3ch * blend_ratio
     
     # Normalize and save
-    result = np.clip(result_image, 0, 255).astype(np.uint8)
+    result = np.clip(result, 0, 255).astype(np.uint8)
     cv2.imwrite(output_image_path, result)
     
     print(f"Stroboscopic image saved to: {output_image_path}")
