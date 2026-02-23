@@ -52,7 +52,7 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 
 ![示例输出](examples/example_out.jpg)
 
-*数据来源：[IEEE Trans. Robot. (T-RO)](https://ieeexplore.ieee.org/document/11300826/)*
+*数据来源：[My Paper on IEEE Trans. Robot. (T-RO)](https://ieeexplore.ieee.org/document/11300826/)*
 
 **均匀采样（默认）**
 
