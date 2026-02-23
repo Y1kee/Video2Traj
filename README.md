@@ -55,6 +55,8 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 
 ![Example output](examples/example_out.jpg)
 
+*Source: [IEEE Trans. Robot. (T-RO)](https://ieeexplore.ieee.org/document/11300826/)*
+
 **Uniform Sampling (Default)**
 
 ```bash
