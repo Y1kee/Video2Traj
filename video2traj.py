@@ -10,7 +10,7 @@ from screeninfo import get_monitors
 # ==========================================
 
 def _open_video(path: str) -> cv2.VideoCapture:
-    """Open video with auto-orientation so portrait videos display correctly."""
+    """Open video with auto-orientation so portrait videos display correctly. | 打开视频并自动旋转使竖屏视频正确显示。"""
     cap = cv2.VideoCapture(path)
     if cap.isOpened() and hasattr(cv2, "CAP_PROP_ORIENTATION_AUTO"):
         cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
@@ -18,7 +18,7 @@ def _open_video(path: str) -> cv2.VideoCapture:
 
 
 def _get_primary_display_bounds() -> Optional[Tuple[int, int, int, int]]:
-    """Return (x, y, width, height) of the primary monitor, or None on failure."""
+    """Return (x, y, width, height) of the primary monitor, or None on failure. | 返回主显示器的 (x, y, width, height)，失败则返回 None。"""
     try:
         monitors = get_monitors()
         if not monitors:
@@ -33,7 +33,7 @@ def _get_primary_display_bounds() -> Optional[Tuple[int, int, int, int]]:
 
 
 def _get_display_max_size() -> Tuple[int, int]:
-    """Return (max_w, max_h) for window sizing: primary monitor * 0.8 to leave margin (e.g. taskbar)."""
+    """Return (max_w, max_h) for window sizing: primary monitor * 0.8 to leave margin (e.g. taskbar). | 返回窗口尺寸 (max_w, max_h)：主显示器 * 0.8 以留出边距（如任务栏）。"""
     SCALE = 0.8
     MIN_W, MIN_H = 800, 600
     FALLBACK_W, FALLBACK_H = 1600, 900
@@ -95,12 +95,12 @@ def auto_select_frames(
 def interactive_select_frames(video_path: str) -> List[int]:
     """Provides a lightweight OpenCV GUI to manually select frames. | 提供轻量级 OpenCV GUI 手动选帧。
 
-    Controls / 操控:
-        Space   = play / pause       | 播放/暂停
-        S       = mark current frame  | 标记当前帧
-        D       = undo last mark      | 撤销最近标记
-        Left/Right = step one frame   | 单帧步进
-        ESC / Q = confirm & exit      | 确认退出
+    Controls | 操控:
+        Space   = play / pause | 播放/暂停
+        S       = mark current frame | 标记当前帧
+        D       = undo last mark | 撤销最近标记
+        Left/Right = step one frame | 单帧步进
+        ESC / Q = confirm & exit | 确认退出
 
     Args:
         video_path (str): Path to the input video file. | 输入视频文件路径。
@@ -119,7 +119,7 @@ def interactive_select_frames(video_path: str) -> List[int]:
     import time as _time
     import sys as _sys
 
-    # Windows: 声明 DPI 感知，避免 OpenCV 窗口被系统缩放放大
+    # Windows: Set DPI awareness to prevent system scaling of OpenCV windows | Windows: 声明 DPI 感知，避免 OpenCV 窗口被系统缩放放大
     if _sys.platform == "win32":
         try:
             import ctypes
@@ -138,7 +138,7 @@ def interactive_select_frames(video_path: str) -> List[int]:
     playing = False
     need_seek = False
     last_seek_done = 0.0
-    SEEK_THROTTLE_S = 0.03  # 拖动时每 30ms 最多 seek 一次，既跟手又不拖垮解码
+    SEEK_THROTTLE_S = 0.03  # Throttle seeks to once per 30ms when dragging to balance responsiveness and decode performance | 拖动时每 30ms 最多 seek 一次，既跟手又不拖垮解码
     WINDOW = "video2traj - Interactive Frame Selector"
     cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
 
@@ -159,7 +159,7 @@ def interactive_select_frames(video_path: str) -> List[int]:
     print(f"Frame size: {frame_w}x{frame_h}")
     print(f"Scale: {disp_scale}")
 
-    # 必须在 createTrackbar 之前 resize，否则 trackbar 会强行扩展窗口宽度
+    # Must resize before createTrackbar, otherwise trackbar will force expand window width | 必须在 createTrackbar 之前 resize，否则 trackbar 会强行扩展窗口宽度
     TRACKBAR_ROW_H = 45
     cv2.resizeWindow(WINDOW, disp_w, disp_h + TRACKBAR_ROW_H)
 
@@ -170,6 +170,14 @@ def interactive_select_frames(video_path: str) -> List[int]:
             need_seek = True
 
     cv2.createTrackbar("Frame", WINDOW, 0, max(total_frames - 1, 0), _on_trackbar)
+
+    # Preview overlay related | 叠加预览相关
+    selected_frame_cache: List[np.ndarray] = []
+    PREVIEW_W = 200
+    PREVIEW_H = int(PREVIEW_W * frame_h / frame_w)
+    preview_dirty = True
+    preview_composite: Optional[np.ndarray] = None
+    show_preview = True
 
     hud_font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = max(disp_w / 1280.0, 0.5)
@@ -192,7 +200,7 @@ def interactive_select_frames(video_path: str) -> List[int]:
                 last_seek_done = now
                 need_seek = False
 
-        # --- Resize to display size, then draw HUD on it ---
+        # --- Resize to display size, then draw HUD on it | 调整到显示尺寸，然后绘制 HUD ---
         disp = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_AREA)
         h, w = disp.shape[:2]
 
@@ -203,7 +211,7 @@ def interactive_select_frames(video_path: str) -> List[int]:
             f"Frame: {current_pos}/{total_frames - 1}  |  FPS: {fps:.1f}  |  Selected: {len(selected)}",
             f"Status: {status_str}{marked_str}",
             "",
-            "[SPACE] Play/Pause    [S] Mark Frame",
+            "[SPACE] Play/Pause    [S] Mark Frame    [P] Toggle Preview",
             "[D] Undo Last Mark    [Left/Right] Step 1 Frame",
             "[ESC/Q] Confirm & Exit",
         ]
@@ -235,7 +243,23 @@ def interactive_select_frames(video_path: str) -> List[int]:
             else:
                 cv2.putText(disp, line_text, (pad, y), hud_font, fs, color, thickness)
 
-        # --- Mini timeline ---
+        # --- Rebuild preview composite if selection changed | 如果选择变化则重建预览合成 ---
+        if preview_dirty:
+            if selected_frame_cache:
+                n = len(selected_frame_cache)
+                if n == 1:
+                    preview_composite = selected_frame_cache[0].copy()
+                else:
+                    comp = selected_frame_cache[0].astype(np.float32)
+                    for i in range(1, n):
+                        a = 0.3 + 0.7 * (i / (n - 1))
+                        comp = comp * (1.0 - a) + selected_frame_cache[i].astype(np.float32) * a
+                    preview_composite = np.clip(comp, 0, 255).astype(np.uint8)
+            else:
+                preview_composite = None
+            preview_dirty = False
+
+        # --- Mini timeline | 迷你时间线 ---
         bar_y = h - TIMELINE_H
         cv2.rectangle(disp, (0, bar_y), (w, h), (40, 40, 40), -1)
         if total_frames > 1:
@@ -244,6 +268,19 @@ def interactive_select_frames(video_path: str) -> List[int]:
             for sf in selected:
                 sx = int(sf / (total_frames - 1) * (w - 1))
                 cv2.line(disp, (sx, bar_y), (sx, h), (0, 255, 0), 2)
+
+        # --- Preview overlay (bottom-right, above timeline, semi-transparent) | 预览叠加层（右下角，时间线上方，半透明） ---
+        if show_preview and preview_composite is not None:
+            ph, pw = preview_composite.shape[:2]
+            margin = 8
+            x1 = w - pw - margin
+            y1 = bar_y - ph - margin
+            if x1 >= 0 and y1 >= 0:
+                roi = disp[y1:y1 + ph, x1:x1 + pw]
+                cv2.addWeighted(preview_composite, 0.75, roi, 0.25, 0, roi)
+                cv2.rectangle(disp, (x1 - 2, y1 - 2), (x1 + pw + 1, y1 + ph + 1), (255, 255, 255), 1)
+                label = f"Preview [{len(selected_frame_cache)}]"
+                cv2.putText(disp, label, (x1, y1 - 6), hud_font, fs * 0.8, (255, 255, 255), 1)
 
         cv2.imshow(WINDOW, disp)
         if first_show:
@@ -263,29 +300,36 @@ def interactive_select_frames(video_path: str) -> List[int]:
             delay = 30
         key = cv2.waitKeyEx(delay)
 
-        # Key handling (waitKeyEx returns extended codes for arrow keys)
+        # Key handling (waitKeyEx returns extended codes for arrow keys) | 按键处理（waitKeyEx 返回方向键的扩展代码）
         if key == 27 or key == ord('q') or key == ord('Q'):
             break
-        elif key == 32:  # Space
+        elif key == 32:  # Space | 空格键
             playing = not playing
         elif key == ord('s') or key == ord('S'):
             if current_pos not in selected:
                 selected.append(current_pos)
+                thumb = cv2.resize(frame, (PREVIEW_W, PREVIEW_H), interpolation=cv2.INTER_AREA)
+                selected_frame_cache.append(thumb)
+                preview_dirty = True
                 print(f"  [+] Marked frame {current_pos} (total: {len(selected)})")
             else:
                 print(f"  [=] Frame {current_pos} already marked")
         elif key == ord('d') or key == ord('D'):
             if selected:
                 removed = selected.pop()
+                selected_frame_cache.pop()
+                preview_dirty = True
                 print(f"  [-] Unmarked frame {removed} (total: {len(selected)})")
-        elif key in (2424832, 65361):  # Left arrow (Win / Linux)
+        elif key in (2424832, 65361):  # Left arrow (Win / Linux) | 左箭头（Win / Linux）
             playing = False
             current_pos = max(0, current_pos - 1)
             need_seek = True
-        elif key in (2555904, 65363):  # Right arrow (Win / Linux)
+        elif key in (2555904, 65363):  # Right arrow (Win / Linux) | 右箭头（Win / Linux）
             playing = False
             current_pos = min(total_frames - 1, current_pos + 1)
             need_seek = True
+        elif key == ord('p') or key == ord('P'):
+            show_preview = not show_preview
 
         if playing:
             ret, new_frame = cap.read()
@@ -332,7 +376,7 @@ def extract_stable_background(
         Optional[np.ndarray]: A 3-channel BGR image representing the stable background, 
             or None if extraction fails. | 代表稳定背景的 3 通道 BGR 图像，如果提取失败则返回 None。
     """
-    MAX_SAMPLES_FOR_BG = 500  # upper bound to avoid OOM
+    MAX_SAMPLES_FOR_BG = 500  # upper bound to avoid OOM | 上限以避免内存溢出
 
     if num_samples <= 0:
         return None
@@ -351,7 +395,7 @@ def extract_stable_background(
         cap.release()
         return None
 
-    # Uniformly pick n frame indices in [start_frame, end_frame)
+    # Uniformly pick n frame indices in [start_frame, end_frame) | 在 [start_frame, end_frame) 内均匀选取 n 个帧索引
     if n == 1:
         frame_indices = [start_frame]
     else:
@@ -411,10 +455,12 @@ def refine_motion_mask(
     open_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_kernel_size, open_kernel_size))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_k)
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for c in contours:
-        if cv2.contourArea(c) < min_area:
-            cv2.fillPoly(mask, [c], 0)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    if num_labels > 1:
+        areas = stats[:, cv2.CC_STAT_AREA]
+        keep = np.zeros(num_labels, dtype=bool)
+        keep[1:] = areas[1:] >= min_area
+        mask = np.where(keep[labels], np.uint8(255), np.uint8(0))
 
     return mask
 
@@ -431,12 +477,14 @@ def render_trajectory(
     min_motion_area: int = 100,
     diff_threshold: int = 20,
     use_gradient: bool = True,
-    grad_threshold: int = 15
+    grad_threshold: int = 15,
+    soft_edge_size: int = 0
 ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-    """Renders a stroboscopic trajectory image using a Z-Buffer (ID Map) architecture. | 使用深度缓冲 (ID Map) 架构渲染残影轨迹图。
+    """Renders a stroboscopic trajectory image via per-frame alpha compositing. | 通过逐帧 Alpha 合成渲染残影轨迹图。
 
-    Uses LAB color-space diff (+ optional gradient diff) for robust foreground segmentation,
-    and seek-based reading for sparse keyframes. | 使用 LAB 色彩差分（可选梯度差分）做前景分割，稀疏关键帧时用 seek 读取提速。
+    Each keyframe is independently segmented and alpha-blended onto the running
+    composite buffer, so overlapping regions blend naturally instead of hard
+    overwriting. | 每帧独立分割并 Alpha 混合到累积缓冲上，重叠区域自然融合而非硬覆盖。
 
     Args:
         video_path (str): Path to the input video. | 输入视频路径。
@@ -451,27 +499,27 @@ def render_trajectory(
         diff_threshold (int, optional): Fixed threshold for LAB diff. 0 = fallback to OTSU. Defaults to 20. | LAB 差分固定阈值，0 则回退 OTSU，默认为 20。
         use_gradient (bool, optional): Enable gradient-based diff as auxiliary mask. Defaults to True. | 启用梯度差分辅助路径，默认开启。
         grad_threshold (int, optional): Threshold for gradient diff. Defaults to 15. | 梯度差分阈值，默认为 15。
+        soft_edge_size (int, optional): Gaussian blur kernel size for soft mask edges. 0 = disabled (binary mask). Defaults to 0. | 软边缘高斯核大小，0 为关闭，默认为 0。
 
     Returns:
         Tuple[np.ndarray, List[Dict]]: (trajectory_image, trajectory_data).
             trajectory_data contains per-frame centroid, bbox and area. |
             返回 (轨迹合成图, 轨迹数据列表)，轨迹数据包含每帧质心、边界框和面积。
     """
-    # 1. Defensive data cleaning at M3 entry | 入口防御性清洗
+    # 1. Defensive data cleaning at M3 entry | 在 M3 入口进行防御性数据清洗
     sorted_indices = sorted(set(frame_indices))
     num_frames = len(sorted_indices)
     if num_frames == 0:
         return bg_image.copy(), []
 
-    rank_map = {frame_idx: rank + 1 for rank, frame_idx in enumerate(sorted_indices)}
+    rank_map = {frame_idx: rank for rank, frame_idx in enumerate(sorted_indices)}
     
-    # 2. Initialize buffers | 初始化缓冲
+    # 2. Initialize composite buffer | 初始化合成缓冲
     height, width = bg_image.shape[:2]
-    id_map = np.zeros((height, width), dtype=np.uint16)
-    color_buffer = np.zeros((height, width, 3), dtype=np.uint8)
+    result = bg_image.astype(np.float32)
     trajectory_data: List[Dict[str, Any]] = []
 
-    # Pre-compute background representations outside the frame loop | 循环外预算背景表示
+    # Pre-compute background representations outside the frame loop | 在帧循环外预计算背景表示
     bg_lab = cv2.cvtColor(bg_image, cv2.COLOR_BGR2LAB)
     bg_gray: Optional[np.ndarray] = None
     bg_grad: Optional[np.ndarray] = None
@@ -482,7 +530,7 @@ def render_trajectory(
             cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
             cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
     
-    # 3. Read frames: seek for sparse keyframes, sequential for dense | 读帧策略
+    # 3. Read frames: seek for sparse keyframes, sequential for dense | 读取帧：稀疏关键帧用 seek，密集帧用顺序读取
     cap = _open_video(video_path)
     if not cap.isOpened():
         print(f"[ERROR] Cannot open video: {video_path}")
@@ -496,8 +544,8 @@ def render_trajectory(
           f"strategy={'seek' if use_seek else 'sequential'}...")
 
     def _process_frame(frame: np.ndarray, frame_idx: int, rank: int) -> None:
-        """Process a single keyframe: diff → mask → Z-buffer write → trajectory extract."""
-        # --- LAB color diff (primary path) ---
+        """Process a single keyframe: diff → mask → alpha composite → trajectory extract. | 处理单个关键帧：差分 → 掩模 → Alpha 合成 → 轨迹提取。"""
+        # --- LAB color diff (primary path) | LAB 颜色差分（主路径） ---
         frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         diff_lab = cv2.absdiff(frame_lab, bg_lab)
         diff_max = np.max(diff_lab, axis=2)
@@ -509,7 +557,7 @@ def render_trajectory(
 
         raw_mask = mask_color
 
-        # --- Gradient diff (auxiliary path) ---
+        # --- Gradient diff (auxiliary path) | 梯度差分（辅助路径） ---
         if use_gradient:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             grad_frame = cv2.magnitude(
@@ -523,12 +571,17 @@ def render_trajectory(
         refined_mask = refine_motion_mask(raw_mask, min_motion_area, blur_size,
                                           close_kernel_size, open_kernel_size)
 
-        # Z-Buffer overwrite | 深度缓冲覆盖
-        valid_pixels = refined_mask > 0
-        id_map[valid_pixels] = rank
-        color_buffer[valid_pixels] = frame[valid_pixels]
+        # Per-frame alpha compositing | 逐帧 Alpha 合成
+        alpha = alpha_start + (alpha_end - alpha_start) * (rank / max(num_frames - 1, 1))
+        if soft_edge_size > 0:
+            mask_f = cv2.GaussianBlur(refined_mask.astype(np.float32) / 255.0, (soft_edge_size, soft_edge_size), 0)
+        else:
+            mask_f = (refined_mask > 0).astype(np.float32)
+        alpha_mask = (mask_f * alpha)[:, :, np.newaxis]
+        frame_f = frame.astype(np.float32)
+        result[:] = result * (1.0 - alpha_mask) + frame_f * alpha_mask
 
-        # Extract trajectory (centroid + bbox) | 提取轨迹数据
+        # Extract trajectory (centroid + bbox) | 提取轨迹（质心 + 边界框）
         M = cv2.moments(refined_mask)
         if M["m00"] > 0:
             cx = M["m10"] / M["m00"]
@@ -571,22 +624,6 @@ def render_trajectory(
         pbar.close()
 
     cap.release()
-    
-    # 4. Vectorized alpha blending via LUT | LUT 向量化混合
-    print("Compositing with vectorized alpha blending...")
-    alpha_lut = np.zeros(num_frames + 1, dtype=np.float32)
-    for rank in range(1, num_frames + 1):
-        if num_frames == 1:
-            alpha_lut[rank] = alpha_end
-        else:
-            alpha_lut[rank] = alpha_start + (alpha_end - alpha_start) * ((rank - 1) / (num_frames - 1))
-
-    alpha_map = alpha_lut[id_map][:, :, np.newaxis]
-    fg_mask = (id_map > 0)[:, :, np.newaxis]
-
-    bg_f = bg_image.astype(np.float32)
-    cb_f = color_buffer.astype(np.float32)
-    result = np.where(fg_mask, cb_f * alpha_map + bg_f * (1.0 - alpha_map), bg_f)
 
     return np.clip(result, 0, 255).astype(np.uint8), trajectory_data
 
@@ -600,24 +637,41 @@ if __name__ == "__main__":
     import json
     import os
 
-    parser = argparse.ArgumentParser(description="video2traj: Generate stroboscopic trajectory images from video.")
-    parser.add_argument("input", type=str, help="Path to the input video file.")
-    parser.add_argument("--output", "-o", type=str, default="trajectory.jpg", help="Output image path.")
+    parser = argparse.ArgumentParser(description="video2traj: Generate robots' trajectory figure from video.")
+    parser.add_argument("input", type=str, 
+                        help="Path to the input video file (required).")
+    parser.add_argument("--output", "-o", type=str, 
+                        help="Output image path (required).")
     parser.add_argument("--trajectory-output", type=str, default=None,
-                        help="Output trajectory JSON path. Defaults to <output>.json.")
-    parser.add_argument("--num-frames", type=int, default=30, help="Number of keyframes to sample uniformly (default 30).")
-    parser.add_argument("--start-frame", type=int, default=0, help="Start frame index.")
-    parser.add_argument("--end-frame", type=int, default=None, help="End frame index (None = all).")
-    parser.add_argument("--num-samples", type=int, default=10, help="Number of frames to sample for median background (default 10).")
-    parser.add_argument("--alpha-start", type=float, default=0.2, help="Opacity of earliest shadow.")
-    parser.add_argument("--alpha-end", type=float, default=1.0, help="Opacity of latest shadow.")
-    parser.add_argument("--blur-size", type=int, default=5, help="Gaussian blur kernel size (odd).")
-    parser.add_argument("--close-kernel-size", type=int, default=21, help="Morphological closing kernel size (default 21).")
-    parser.add_argument("--open-kernel-size", type=int, default=5, help="Morphological opening kernel size (default 5).")
-    parser.add_argument("--min-motion-area", type=int, default=100, help="Minimum motion mask area.")
-    parser.add_argument("--diff-threshold", type=int, default=20, help="LAB diff threshold (0 = fallback to OTSU).")
-    parser.add_argument("--no-gradient", action="store_true", help="Disable gradient-based auxiliary mask (enabled by default).")
-    parser.add_argument("--grad-threshold", type=int, default=15, help="Gradient diff threshold (default 15).")
+                        help="Output trajectory JSON path. Default: <output>.json in the current directory.")
+    parser.add_argument("--num-frames", type=int, default=10, 
+                        help="Number of keyframes to sample uniformly.")
+    parser.add_argument("--start-frame", type=int, default=0, 
+                        help="Start frame index.")
+    parser.add_argument("--end-frame", type=int, default=None, 
+                        help="End frame index (None = all).")
+    parser.add_argument("--num-samples", type=int, default=5, 
+                        help="Number of frames to sample for median background.")
+    parser.add_argument("--alpha-start", type=float, default=0.2, 
+                        help="Opacity of earliest shadow.")
+    parser.add_argument("--alpha-end", type=float, default=1.0, 
+                        help="Opacity of latest shadow.")
+    parser.add_argument("--blur-size", type=int, default=5, 
+                        help="Gaussian blur kernel size (must be odd).")
+    parser.add_argument("--close-kernel-size", type=int, default=21, 
+                        help="Morphological closing kernel size.")
+    parser.add_argument("--open-kernel-size", type=int, default=5, 
+                        help="Morphological opening kernel size.")
+    parser.add_argument("--min-motion-area", type=int, default=100, 
+                        help="Minimum motion mask area.")
+    parser.add_argument("--diff-threshold", type=int, default=20, 
+                        help="LAB diff threshold (0 = fallback to OTSU).")
+    parser.add_argument("--no-gradient", action="store_true",
+                        help="Disable gradient-based segmentation (enabled by default).")
+    parser.add_argument("--grad-threshold", type=int, default=15,
+                        help="Gradient difference threshold.")
+    parser.add_argument("--soft-edge", type=int, default=0,
+                        help="Soft edge kernel size (0 = disabled, must be odd if > 0).")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--uniform", action="store_true",
@@ -634,6 +688,8 @@ if __name__ == "__main__":
         exit(1)
     if args.blur_size % 2 == 0:
         raise ValueError("--blur-size must be odd.")
+    if args.soft_edge > 0 and args.soft_edge % 2 == 0:
+        raise ValueError("--soft-edge must be odd (or 0 to disable).")
 
     out_dir = os.path.dirname(args.output)
     if out_dir and not os.path.exists(out_dir):
@@ -643,7 +699,7 @@ if __name__ == "__main__":
     if traj_json_path is None:
         traj_json_path = os.path.splitext(args.output)[0] + ".json"
 
-    # --- Step 1: Select frames ---
+    # --- Step 1: Select frames | 步骤 1：选择帧 ---
     if args.interactive:
         frame_indices = interactive_select_frames(args.input)
         if not frame_indices:
@@ -662,14 +718,14 @@ if __name__ == "__main__":
         frame_indices = auto_select_frames(total, args.start_frame, args.end_frame, args.num_frames)
         print(f"Uniform sampling: {len(frame_indices)} frames (num_samples={args.num_frames})")
 
-    # --- Step 2: Extract background ---
+    # --- Step 2: Extract background | 步骤 2：提取背景 ---
     print("Extracting stable background...")
     bg = extract_stable_background(args.input, args.start_frame, args.end_frame, args.num_samples)
     if bg is None:
         print("[ERROR] Background extraction failed.")
         exit(1)
 
-    # --- Step 3: Render trajectory ---
+    # --- Step 3: Render trajectory | 步骤 3：渲染轨迹 ---
     result_img, traj_data = render_trajectory(
         args.input, bg, frame_indices,
         alpha_start=args.alpha_start, alpha_end=args.alpha_end,
@@ -680,9 +736,10 @@ if __name__ == "__main__":
         diff_threshold=args.diff_threshold,
         use_gradient=not args.no_gradient,
         grad_threshold=args.grad_threshold,
+        soft_edge_size=args.soft_edge,
     )
 
-    # --- Step 4: Save outputs ---
+    # --- Step 4: Save outputs | 步骤 4：保存输出 ---
     cv2.imwrite(args.output, result_img)
     print(f"Trajectory image saved: {args.output}")
 

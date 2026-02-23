@@ -147,12 +147,24 @@ slprj/
 # ===========================
 # Data and Results
 # ===========================
+# Ignore output files (but allow examples/ folder)
 *.jpg
 *.json
+!examples/**/*.jpg
+!examples/**/*.json
 # *.mat
 # *.csv
 # *.h5
 # *.hdf5
+
+# Video files (usually too large for git)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
 
 # ===========================
 # Documentation
