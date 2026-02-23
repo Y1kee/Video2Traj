@@ -3,7 +3,7 @@
   <a href="README_zh.md"><img src="https://img.shields.io/badge/语言-简体中文-red.svg" alt="简体中文"></a>
 </div>
 
-# video2traj
+# Video2Traj
 
 ## 📹 Video to Trajectory Figure Generator
 
@@ -52,6 +52,8 @@ pip install -r requirements.txt
 ```bash
 uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 ```
+
+![Example output](examples/example_out.jpg)
 
 **Uniform Sampling (Default)**
 

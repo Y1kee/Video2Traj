@@ -1,9 +1,6 @@
-<div align="right">
-  <a href="README.md"><img src="https://img.shields.io/badge/Language-English-blue.svg" alt="English"></a>
-  <a href="README_zh.md"><img src="https://img.shields.io/badge/语言-简体中文-red.svg" alt="简体中文"></a>
-</div>
 
-# video2traj
+
+# Video2Traj
 
 ## 📹 视频轨迹图生成器
 
@@ -52,6 +49,8 @@ pip install -r requirements.txt
 ```bash
 uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 ```
+
+![示例输出](examples/example_out.jpg)
 
 **均匀采样（默认）**
 
