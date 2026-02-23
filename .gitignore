@@ -145,9 +145,10 @@ diary/tmp/
 slprj/
 
 # ===========================
-# Data and Results (optional)
+# Data and Results
 # ===========================
-# Uncomment if you don't want to track large data files
+*.jpg
+*.json
 # *.mat
 # *.csv
 # *.h5
