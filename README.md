@@ -55,7 +55,7 @@ uv pip install -r requirements.txt
 uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
 ```
 
-![Example output](examples/example_out.jpg)
+![Example output](examples/example_single.jpg)
 
 *Source: [My Paper on IEEE Trans. Robot. (T-RO)](https://ieeexplore.ieee.org/document/11300826/)*
 
@@ -88,6 +88,16 @@ Interactive Controls:
 - `ESC/Q` - Confirm and exit
 
 **Multi-video mode** (merge trajectories from multiple videos onto one image; requires a config file):
+
+**Try with Example** (uses `examples/example_1.mp4` and `examples/example_2.mp4`; output: `examples/example_multi.jpg`):
+
+```bash
+uv run python video2traj.py --config config_template.yaml
+```
+
+![Multi-video example output](examples/example_multi.jpg)
+
+To use your own videos, copy the template and edit paths/parameters:
 
 ```bash
 # 1. Copy the template and edit paths/parameters

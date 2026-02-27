@@ -856,11 +856,15 @@ if __name__ == "__main__":
             raw = f.read()
         if config_path.lower().endswith(".json"):
             return json.loads(raw)
-        try:
-            import yaml
+        if config_path.lower().endswith((".yaml", ".yml")):
+            try:
+                import yaml
+            except ImportError:
+                raise ImportError(
+                    "YAML config requires PyYAML. Install with: uv pip install pyyaml"
+                ) from None
             return yaml.safe_load(raw) or {}
-        except ImportError:
-            return json.loads(raw)
+        return json.loads(raw)
 
     def _validate_multi_video_config(config: Dict[str, Any], config_path: str) -> None:
         """Validates multi-video config: videos list, mode fields, required fields per mode, path existence. | 校验多视频配置。"""

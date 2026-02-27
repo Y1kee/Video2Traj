@@ -166,6 +166,9 @@ slprj/
 *.flv
 *.wmv
 
+# Allow small example videos under examples/ to be committed
+!examples/**/*.mp4
+
 # ===========================
 # Documentation
 # ===========================

@@ -52,7 +52,7 @@ uv pip install -r requirements.txt
 uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
 ```
 
-![示例输出](examples/example_out.jpg)
+![示例输出](examples/example_single.jpg)
 
 *数据来源：[My Paper on IEEE Trans. Robot. (T-RO)](https://ieeexplore.ieee.org/document/11300826/)*
 
@@ -85,6 +85,16 @@ uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_
 - `ESC/Q` - 确认退出
 
 **多视频模式**（将多个视频的轨迹合并到一张图，需使用配置文件）：
+
+**使用示例运行**（使用 `examples/example_1.mp4` 与 `examples/example_2.mp4`，输出为 `examples/example_multi.jpg`）：
+
+```bash
+uv run python video2traj.py --config config_template.yaml
+```
+
+![多视频示例输出](examples/example_multi.jpg)
+
+若使用自己的视频，请复制模板并编辑路径与参数：
 
 ```bash
 # 1. 复制模板并编辑视频路径与参数
