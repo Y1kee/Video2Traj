@@ -3,3 +3,4 @@ opencv-python>=4.5.0
 numpy>=1.19.0
 tqdm>=4.60.0
 screeninfo>=0.8.1
+PyYAML>=5.4  # For multi-video config (YAML); falls back to JSON if missing

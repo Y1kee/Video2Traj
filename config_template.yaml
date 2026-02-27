@@ -1,0 +1,54 @@
+# Multi-video trajectory configuration template | 多视频轨迹配置模板
+# Copy to e.g. my_config.yaml and run: python video2traj.py --config my_config.yaml
+# 复制为 my_config.yaml 后运行: python video2traj.py --config my_config.yaml
+
+videos:
+  # Manual frame indices | 手动指定帧号
+  - path: "video1.mp4"
+    mode: "manual"
+    frames: [10, 30, 50, 80, 120]
+
+  # Uniform sampling over full video | 全片均匀采样
+  - path: "video2.mp4"
+    mode: "uniform"
+    num_frames: 20
+
+  # Uniform sampling within range [start_frame, end_frame) | 在指定区间内均匀采样
+  - path: "video3.mp4"
+    mode: "uniform"
+    num_frames: 10
+    start_frame: 50
+    end_frame: 300  # null = to end of video | null = 到视频结尾
+
+  # Interactive: GUI frame selection at runtime | 交互模式：运行时 GUI 选帧
+  # - path: "video4.mp4"
+  #   mode: "interactive"
+
+# Defaults when not specified per video | 每个视频未指定时使用的默认值
+defaults:
+  mode: "uniform"
+  num_frames: 15
+  start_frame: 0
+  end_frame: null  # null = video end | null = 视频结尾
+
+# Render parameters | 渲染参数
+render:
+  alpha_start: 0.2
+  alpha_end: 1.0
+  blur_size: 5
+  diff_threshold: 20
+  use_gradient: true
+  grad_threshold: 15
+  soft_edge: 0
+  close_kernel_size: 21
+  open_kernel_size: 5
+  min_motion_area: 100
+
+# Background extraction from all videos | 从所有视频提取背景
+background:
+  num_samples_per_video: 5  # Frames per video for median background | 每个视频参与中值背景的帧数
+
+# Output paths (relative to config file directory) | 输出路径（相对于配置文件所在目录）
+output:
+  image: "result.png"
+  trajectory_json: "result.json"

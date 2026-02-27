@@ -420,6 +420,65 @@ def extract_stable_background(
     return background
 
 
+def extract_background_from_multiple_videos(
+    video_paths: List[str],
+    num_samples_per_video: int = 5
+) -> Optional[np.ndarray]:
+    """Extracts a unified clean background by sampling frames from multiple videos and taking the median. | 从多个视频采样帧并取中值得到统一干净背景。
+
+    Each video is uniformly sampled for N frames; all samples are merged (capped at 500 frames
+    to avoid OOM), then temporal median is computed to obtain a single background. |
+    每个视频均匀采样 N 帧，合并后取中值（总帧数上限 500 以防 OOM）。
+
+    Args:
+        video_paths (List[str]): Paths to input videos. | 输入视频路径列表。
+        num_samples_per_video (int, optional): Number of frames to sample per video for background. Defaults to 5. | 每个视频用于背景的采样帧数，默认 5。
+
+    Returns:
+        Optional[np.ndarray]: Unified BGR background image, or None if extraction fails. | 统一的 BGR 背景图，失败则返回 None。
+    """
+    MAX_TOTAL_SAMPLES = 500  # Upper bound to avoid OOM | 上限以避免内存溢出
+
+    all_frame_indices: List[Tuple[str, List[int]]] = []
+    for path in video_paths:
+        cap = _open_video(path)
+        if not cap.isOpened():
+            print(f"[WARN] Cannot open video for background: {path}, skipping.")
+            continue
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        if total <= 0:
+            continue
+        indices = auto_select_frames(total, 0, None, num_samples_per_video)
+        all_frame_indices.append((path, indices))
+
+    if not all_frame_indices:
+        return None
+
+    # Collect frames from all videos until cap | 从所有视频收集帧直至上限
+    frames: List[np.ndarray] = []
+    for path, indices in all_frame_indices:
+        if len(frames) >= MAX_TOTAL_SAMPLES:
+            break
+        cap = _open_video(path)
+        if not cap.isOpened():
+            continue
+        n_to_take = min(len(indices), MAX_TOTAL_SAMPLES - len(frames))
+        for i in range(n_to_take):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, indices[i])
+            ret, frame = cap.read()
+            if ret:
+                frames.append(frame)
+        cap.release()
+
+    if not frames:
+        return None
+    print(f"Computing median background from {len(frames)} sampled frames (multi-video)...")
+    frames_array = np.array(frames)
+    background = np.median(frames_array, axis=0).astype(np.uint8)
+    return background
+
+
 # ==========================================
 # Module 3: Rendering Engine | 核心渲染引擎
 # ==========================================
@@ -628,6 +687,159 @@ def render_trajectory(
     return np.clip(result, 0, 255).astype(np.uint8), trajectory_data
 
 
+def render_multi_video_trajectory(
+    video_paths: List[str],
+    bg_image: np.ndarray,
+    frame_indices_per_video: List[List[int]],
+    alpha_start: float = 0.2,
+    alpha_end: float = 1.0,
+    blur_size: int = 5,
+    close_kernel_size: int = 21,
+    open_kernel_size: int = 5,
+    min_motion_area: int = 100,
+    diff_threshold: int = 20,
+    use_gradient: bool = True,
+    grad_threshold: int = 15,
+    soft_edge_size: int = 0,
+) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    """Renders trajectory from multiple videos onto a single canvas. | 将多个视频的轨迹渲染到同一画布。
+
+    All frames are segmented against the unified background, then alpha-blended
+    onto the accumulating canvas. Each video has independent alpha gradient. |
+    所有帧都与统一背景做差分，然后 alpha 混合到累积画布。每个视频独立渐变。
+
+    Args:
+        video_paths (List[str]): Paths to input videos. | 输入视频路径列表。
+        bg_image (np.ndarray): The unified clean background. | 统一的干净背景。
+        frame_indices_per_video (List[List[int]]): Frame indices for each video. | 每个视频的帧索引列表。
+        alpha_start (float, optional): Opacity of earliest shadow. Defaults to 0.2. | 最早残影的不透明度，默认 0.2。
+        alpha_end (float, optional): Opacity of latest shadow. Defaults to 1.0. | 最新残影的不透明度，默认 1.0。
+        blur_size (int, optional): Gaussian blur kernel size for mask. Defaults to 5. | 掩模高斯模糊核大小，默认 5。
+        close_kernel_size (int, optional): Morphological closing kernel size. Defaults to 21. | 闭运算核大小，默认 21。
+        open_kernel_size (int, optional): Morphological opening kernel size. Defaults to 5. | 开运算核大小，默认 5。
+        min_motion_area (int, optional): Minimum motion mask area. Defaults to 100. | 最小运动掩模面积，默认 100。
+        diff_threshold (int, optional): LAB diff threshold (0 = OTSU). Defaults to 20. | LAB 差分阈值，0 为 OTSU，默认 20。
+        use_gradient (bool, optional): Use gradient-based diff. Defaults to True. | 是否使用梯度差分，默认 True。
+        grad_threshold (int, optional): Gradient diff threshold. Defaults to 15. | 梯度差分阈值，默认 15。
+        soft_edge_size (int, optional): Soft edge kernel size (0 = disabled). Defaults to 0. | 软边缘核大小，0 为关闭，默认 0。
+
+    Returns:
+        Tuple[np.ndarray, List[Dict[str, Any]]]: (canvas, grouped_trajectory_data).
+            grouped_trajectory_data = [{"video": path, "trajectory": [...]}, ...] |
+            返回 (画布, 分组轨迹数据)。轨迹数据按视频分组。
+    """
+    height, width = bg_image.shape[:2]
+    canvas = bg_image.astype(np.float32)  # Initialize composite buffer | 初始化合成缓冲
+    grouped_trajectory_data: List[Dict[str, Any]] = []
+
+    # Pre-compute background representations | 预计算背景表示
+    bg_lab = cv2.cvtColor(bg_image, cv2.COLOR_BGR2LAB)
+    bg_gray: Optional[np.ndarray] = None
+    bg_grad: Optional[np.ndarray] = None
+    if use_gradient or diff_threshold == 0:
+        bg_gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
+    if use_gradient:
+        bg_grad = cv2.magnitude(
+            cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
+            cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
+
+    for v_idx, (video_path, frame_indices) in enumerate(zip(video_paths, frame_indices_per_video)):
+        sorted_indices = sorted(set(frame_indices))
+        num_frames = len(sorted_indices)
+        if num_frames == 0:
+            grouped_trajectory_data.append({"video": video_path, "trajectory": []})
+            continue
+
+        rank_map = {frame_idx: rank for rank, frame_idx in enumerate(sorted_indices)}
+        video_trajectory: List[Dict[str, Any]] = []
+
+        cap = _open_video(video_path)
+        if not cap.isOpened():
+            print(f"[ERROR] Cannot open video: {video_path}")
+            grouped_trajectory_data.append({"video": video_path, "trajectory": []})
+            continue
+
+        max_frame_needed = sorted_indices[-1]
+        frame_span = max_frame_needed - sorted_indices[0] + 1
+        use_seek = num_frames < frame_span * 0.3
+        print(f"Processing video {v_idx + 1}/{len(video_paths)}: {video_path} ({num_frames} frames, "
+              f"strategy={'seek' if use_seek else 'sequential'})...")
+
+        def _process_frame(frame: np.ndarray, frame_idx: int, rank: int) -> None:
+            frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            diff_lab = cv2.absdiff(frame_lab, bg_lab)
+            diff_max = np.max(diff_lab, axis=2)
+            if diff_threshold > 0:
+                _, mask_color = cv2.threshold(diff_max, diff_threshold, 255, cv2.THRESH_BINARY)
+            else:
+                _, mask_color = cv2.threshold(diff_max, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            raw_mask = mask_color
+            if use_gradient and bg_gray is not None and bg_grad is not None:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                grad_frame = cv2.magnitude(
+                    cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3),
+                    cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))
+                diff_grad = np.abs(grad_frame - bg_grad)
+                diff_grad_u8 = np.clip(diff_grad, 0, 255).astype(np.uint8)
+                _, mask_grad = cv2.threshold(diff_grad_u8, grad_threshold, 255, cv2.THRESH_BINARY)
+                raw_mask = cv2.bitwise_or(raw_mask, mask_grad)
+            refined_mask = refine_motion_mask(
+                raw_mask, min_motion_area, blur_size, close_kernel_size, open_kernel_size)
+            # Per-video alpha gradient: first frame = alpha_start, last = alpha_end | 每视频独立 alpha 渐变
+            alpha = alpha_start + (alpha_end - alpha_start) * (rank / max(num_frames - 1, 1))
+            if soft_edge_size > 0:
+                mask_f = cv2.GaussianBlur(
+                    refined_mask.astype(np.float32) / 255.0,
+                    (soft_edge_size, soft_edge_size), 0)
+            else:
+                mask_f = (refined_mask > 0).astype(np.float32)
+            alpha_mask = (mask_f * alpha)[:, :, np.newaxis]
+            frame_f = frame.astype(np.float32)
+            canvas[:] = canvas * (1.0 - alpha_mask) + frame_f * alpha_mask
+            M = cv2.moments(refined_mask)
+            if M["m00"] > 0:
+                cx = M["m10"] / M["m00"]
+                cy = M["m01"] / M["m00"]
+                x, y, w, h = cv2.boundingRect(refined_mask)
+                video_trajectory.append({
+                    "frame": frame_idx,
+                    "cx": round(cx, 2), "cy": round(cy, 2),
+                    "bbox": [int(x), int(y), int(w), int(h)],
+                    "area": round(M["m00"] / 255.0, 1),
+                })
+
+        if use_seek:
+            for frame_idx in tqdm(sorted_indices, desc="Rendering (seek)", unit="frame"):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                _process_frame(frame, frame_idx, rank_map[frame_idx])
+        else:
+            pbar = tqdm(total=num_frames, desc="Rendering (sequential)", unit="frame")
+            current_frame_idx = 0
+            consecutive_failures = 0
+            MAX_CONSECUTIVE_FAILURES = 5
+            while cap.isOpened() and current_frame_idx <= max_frame_needed:
+                ret, frame = cap.read()
+                if not ret:
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        break
+                    current_frame_idx += 1
+                    continue
+                consecutive_failures = 0
+                if current_frame_idx in rank_map:
+                    _process_frame(frame, current_frame_idx, rank_map[current_frame_idx])
+                    pbar.update(1)
+                current_frame_idx += 1
+            pbar.close()
+        cap.release()
+        grouped_trajectory_data.append({"video": video_path, "trajectory": video_trajectory})
+
+    return np.clip(canvas, 0, 255).astype(np.uint8), grouped_trajectory_data
+
+
 # ==========================================
 # Entry Point | 程序入口
 # ==========================================
@@ -636,35 +848,76 @@ if __name__ == "__main__":
     import argparse
     import json
     import os
+    import sys
+
+    def _load_yaml_or_json(config_path: str) -> Dict[str, Any]:
+        """Loads configuration from YAML or JSON file. | 从 YAML 或 JSON 文件加载配置。"""
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        if config_path.lower().endswith(".json"):
+            return json.loads(raw)
+        try:
+            import yaml
+            return yaml.safe_load(raw) or {}
+        except ImportError:
+            return json.loads(raw)
+
+    def _validate_multi_video_config(config: Dict[str, Any], config_path: str) -> None:
+        """Validates multi-video config: videos list, mode fields, required fields per mode, path existence. | 校验多视频配置。"""
+        if "videos" not in config or not config["videos"]:
+            raise ValueError("Config must contain non-empty 'videos' list. | 配置必须包含非空 'videos' 列表。")
+        defaults = config.get("defaults", {})
+        config_dir = os.path.dirname(os.path.abspath(config_path))
+        for i, v in enumerate(config["videos"]):
+            if "path" not in v:
+                raise ValueError(f"videos[{i}] missing 'path'. | videos[{i}] 缺少 'path'。")
+            path = v["path"]
+            if not os.path.isabs(path):
+                path = os.path.join(config_dir, path)
+            if not os.path.isfile(path):
+                raise ValueError(f"Video file not found: {v['path']} | 视频文件不存在: {v['path']}")
+            mode = v.get("mode", defaults.get("mode", "uniform"))
+            if mode == "manual":
+                if "frames" not in v:
+                    raise ValueError(f"{v['path']}: mode='manual' requires 'frames'. | 需要 'frames'。")
+            elif mode == "uniform":
+                if "num_frames" not in v and "num_frames" not in defaults:
+                    raise ValueError(f"{v['path']}: mode='uniform' requires 'num_frames' (or in defaults). | 需要 num_frames。")
+            elif mode != "interactive":
+                raise ValueError(f"Unknown mode: {mode} | 未知模式: {mode}")
 
     parser = argparse.ArgumentParser(description="video2traj: Generate robots' trajectory figure from video.")
-    parser.add_argument("input", type=str, 
-                        help="Path to the input video file (required).")
-    parser.add_argument("--output", "-o", type=str, 
-                        help="Output image path (required).")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--input", type=str,
+                             help="Single video path (single-video mode).")
+    input_group.add_argument("--config", type=str,
+                             help="YAML/JSON config file for multi-video mode.")
+
+    parser.add_argument("--output", "-o", type=str, default=None,
+                        help="Output image path (required in single-video mode).")
     parser.add_argument("--trajectory-output", type=str, default=None,
-                        help="Output trajectory JSON path. Default: <output>.json in the current directory.")
-    parser.add_argument("--num-frames", type=int, default=10, 
-                        help="Number of keyframes to sample uniformly.")
-    parser.add_argument("--start-frame", type=int, default=0, 
-                        help="Start frame index.")
-    parser.add_argument("--end-frame", type=int, default=None, 
-                        help="End frame index (None = all).")
-    parser.add_argument("--num-samples", type=int, default=5, 
-                        help="Number of frames to sample for median background.")
-    parser.add_argument("--alpha-start", type=float, default=0.2, 
+                        help="Output trajectory JSON path. Default: <output>.json in single-video mode.")
+    parser.add_argument("--num-frames", type=int, default=10,
+                        help="Number of keyframes to sample uniformly (single-video only).")
+    parser.add_argument("--start-frame", type=int, default=0,
+                        help="Start frame index (single-video only).")
+    parser.add_argument("--end-frame", type=int, default=None,
+                        help="End frame index (None = all, single-video only).")
+    parser.add_argument("--num-samples", type=int, default=5,
+                        help="Number of frames to sample for median background (single-video only).")
+    parser.add_argument("--alpha-start", type=float, default=0.2,
                         help="Opacity of earliest shadow.")
-    parser.add_argument("--alpha-end", type=float, default=1.0, 
+    parser.add_argument("--alpha-end", type=float, default=1.0,
                         help="Opacity of latest shadow.")
-    parser.add_argument("--blur-size", type=int, default=5, 
+    parser.add_argument("--blur-size", type=int, default=5,
                         help="Gaussian blur kernel size (must be odd).")
-    parser.add_argument("--close-kernel-size", type=int, default=21, 
+    parser.add_argument("--close-kernel-size", type=int, default=21,
                         help="Morphological closing kernel size.")
-    parser.add_argument("--open-kernel-size", type=int, default=5, 
+    parser.add_argument("--open-kernel-size", type=int, default=5,
                         help="Morphological opening kernel size.")
-    parser.add_argument("--min-motion-area", type=int, default=100, 
+    parser.add_argument("--min-motion-area", type=int, default=100,
                         help="Minimum motion mask area.")
-    parser.add_argument("--diff-threshold", type=int, default=20, 
+    parser.add_argument("--diff-threshold", type=int, default=20,
                         help="LAB diff threshold (0 = fallback to OTSU).")
     parser.add_argument("--no-gradient", action="store_true",
                         help="Disable gradient-based segmentation (enabled by default).")
@@ -675,26 +928,145 @@ if __name__ == "__main__":
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--uniform", action="store_true",
-                            help="Uniformly sample N frames (default mode).")
+                            help="Uniformly sample N frames (default, single-video only).")
     mode_group.add_argument("--manual", type=str, metavar="FRAMES", default=None,
-                            help="Specify frame indices, comma-separated (e.g. '30,60,90,120').")
+                            help="Specify frame indices, comma-separated (single-video only).")
     mode_group.add_argument("-i", "--interactive", action="store_true",
-                            help="Open interactive GUI to select frames.")
+                            help="Open interactive GUI to select frames (single-video only).")
 
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        # Build a clear error for config mode | 为配置模式给出明确提示
+        msg = f"Unrecognized arguments: {', '.join(unknown)}."
+        if args.config:
+            msg += (
+                " In multi-video mode (--config) all parameters (e.g. alpha_start, alpha_end) "
+                "are read from the config file. Edit the YAML under 'render:' instead of passing "
+                "them on the command line."
+            )
+        parser.error(msg)
 
-    if not os.path.isfile(args.input):
-        print(f"[ERROR] Input file not found: {args.input}")
-        exit(1)
     if args.blur_size % 2 == 0:
         raise ValueError("--blur-size must be odd.")
     if args.soft_edge > 0 and args.soft_edge % 2 == 0:
         raise ValueError("--soft-edge must be odd (or 0 to disable).")
 
+    # === Multi-video mode (config file) | 多视频模式（配置文件）===
+    if args.config:
+        # Reject render/frame CLI options in config mode so user edits YAML instead of silent ignore
+        # 多视频模式下拒绝通过命令行传入渲染/选帧参数，提示在配置文件中修改
+        render_cli_flags = [
+            "--alpha-start", "--alpha-end", "--blur-size", "--diff-threshold",
+            "--close-kernel-size", "--open-kernel-size", "--min-motion-area",
+            "--no-gradient", "--grad-threshold", "--soft-edge",
+            "--num-frames", "--start-frame", "--end-frame", "--num-samples",
+        ]
+        argv_str = " ".join(sys.argv)
+        passed_render = [f for f in render_cli_flags if f in argv_str]
+        if passed_render:
+            parser.error(
+                "Multi-video mode (--config) reads all parameters from the config file. "
+                "Do not pass these on the command line: " + ", ".join(passed_render) + ". "
+                "Set them in the YAML under 'render:', 'defaults:', or 'background:' instead."
+            )
+        if not os.path.isfile(args.config):
+            print(f"[ERROR] Config file not found: {args.config}")
+            exit(1)
+        config = _load_yaml_or_json(args.config)
+        _validate_multi_video_config(config, args.config)
+        videos_config = config["videos"]
+        defaults = config.get("defaults", {})
+        render_config = config.get("render", {})
+        bg_config = config.get("background", {})
+        output_config = config.get("output", {})
+        config_dir = os.path.dirname(os.path.abspath(args.config))
+
+        video_paths = []
+        for v in videos_config:
+            p = v["path"]
+            if not os.path.isabs(p):
+                p = os.path.join(config_dir, p)
+            video_paths.append(p)
+
+        print("Extracting unified background from all videos...")
+        bg = extract_background_from_multiple_videos(
+            video_paths,
+            num_samples_per_video=bg_config.get("num_samples_per_video", 5),
+        )
+        if bg is None:
+            print("[ERROR] Background extraction failed.")
+            exit(1)
+
+        frame_indices_per_video = []
+        for video_config in videos_config:
+            path = video_config["path"]
+            if not os.path.isabs(path):
+                path = os.path.join(config_dir, path)
+            mode = video_config.get("mode", defaults.get("mode", "uniform"))
+            if mode == "manual":
+                indices = video_config["frames"]
+            elif mode == "interactive":
+                print(f"\n=== Interactive frame selection for {path} ===")
+                indices = interactive_select_frames(path)
+            else:
+                cap = _open_video(path)
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+                end_f = video_config.get("end_frame", defaults.get("end_frame"))
+                end_val = None if end_f is None else min(end_f, total)  # null = video end | null = 视频结尾
+                indices = auto_select_frames(
+                    total,
+                    video_config.get("start_frame", defaults.get("start_frame", 0)),
+                    end_val,
+                    video_config.get("num_frames", defaults.get("num_frames", 15)),
+                )
+            frame_indices_per_video.append(indices)
+            print(f"  {video_config['path']}: {len(indices)} frames (mode={mode})")
+
+        result_img, traj_data = render_multi_video_trajectory(
+            video_paths,
+            bg,
+            frame_indices_per_video,
+            alpha_start=render_config.get("alpha_start", 0.2),
+            alpha_end=render_config.get("alpha_end", 1.0),
+            blur_size=render_config.get("blur_size", 5),
+            close_kernel_size=render_config.get("close_kernel_size", 21),
+            open_kernel_size=render_config.get("open_kernel_size", 5),
+            min_motion_area=render_config.get("min_motion_area", 100),
+            diff_threshold=render_config.get("diff_threshold", 20),
+            use_gradient=render_config.get("use_gradient", True),
+            grad_threshold=render_config.get("grad_threshold", 15),
+            soft_edge_size=render_config.get("soft_edge", 0),
+        )
+
+        output_image = output_config.get("image", "result.png")
+        if not os.path.isabs(output_image):
+            output_image = os.path.join(config_dir, output_image)
+        out_dir = os.path.dirname(output_image)
+        if out_dir and not os.path.exists(out_dir):
+            os.makedirs(out_dir, exist_ok=True)
+        cv2.imwrite(output_image, result_img)
+        print(f"Saved: {output_image}")
+
+        if output_config.get("trajectory_json"):
+            traj_path = output_config["trajectory_json"]
+            if not os.path.isabs(traj_path):
+                traj_path = os.path.join(config_dir, traj_path)
+            with open(traj_path, "w", encoding="utf-8") as f:
+                json.dump({"videos": traj_data}, f, indent=2, ensure_ascii=False)
+            print(f"Trajectory JSON saved: {traj_path}")
+        exit(0)
+
+    # === Single-video mode (unchanged) | 单视频模式（保持原有逻辑）===
+    if not args.output:
+        parser.error("--output / -o is required when using --input.")
+    if not os.path.isfile(args.input):
+        print(f"[ERROR] Input file not found: {args.input}")
+        exit(1)
+
     out_dir = os.path.dirname(args.output)
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
-
     traj_json_path = args.trajectory_output
     if traj_json_path is None:
         traj_json_path = os.path.splitext(args.output)[0] + ".json"
@@ -742,7 +1114,6 @@ if __name__ == "__main__":
     # --- Step 4: Save outputs | 步骤 4：保存输出 ---
     cv2.imwrite(args.output, result_img)
     print(f"Trajectory image saved: {args.output}")
-
     with open(traj_json_path, "w", encoding="utf-8") as f:
         json.dump(traj_data, f, indent=2, ensure_ascii=False)
     print(f"Trajectory data saved: {traj_json_path} ({len(traj_data)} points)")

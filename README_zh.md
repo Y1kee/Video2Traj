@@ -39,15 +39,17 @@ git clone https://github.com/yourusername/video2traj.git
 cd video2traj
 
 # 安装依赖
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 🚀 快速开始
 
+**单视频模式**（使用 `--input` 与 `--output`）：
+
 **使用示例视频试用**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
 ```
 
 ![示例输出](examples/example_out.jpg)
@@ -57,19 +59,19 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 **均匀采样（默认）**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
 ```
 
 **手动选帧**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
 ```
 
 **播放器交互模式**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --interactive
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --interactive
 ```
 
 交互操控键：
@@ -81,6 +83,19 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg 
 - 拖动进度条 - 跳转到指定帧
 - `P` - 打开/关闭已选帧预览
 - `ESC/Q` - 确认退出
+
+**多视频模式**（将多个视频的轨迹合并到一张图，需使用配置文件）：
+
+```bash
+# 1. 复制模板并编辑视频路径与参数
+cp config_template.yaml my_config.yaml
+
+# 2. 使用配置文件运行
+uv run python video2traj.py --config my_config.yaml
+```
+
+配置文件格式（YAML 或 JSON）：在 `videos` 下列出各视频，每项包含 `path`、`mode`（`manual` / `uniform` / `interactive`）及对应字段（`frames`、`num_frames`、`start_frame`、`end_frame`）。共用选项放在 `defaults`。输出路径在 `output.image` 与 `output.trajectory_json`。完整示例见 [config_template.yaml](config_template.yaml)。
+
 
 ### ⚙️ 高级参数
 
@@ -123,10 +138,10 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg 
 --soft-edge 9                   # 软边缘核大小（必须是奇数，0=禁用）
 ```
 
-**完整示例**
+**完整示例（单视频）**
 
 ```bash
-python video2traj.py input.mp4 -o output.jpg \
+uv run python video2traj.py --input input.mp4 -o output.jpg \
   --num-frames 50 \
   --diff-threshold 30 \
   --soft-edge 11 \
@@ -136,8 +151,10 @@ python video2traj.py input.mp4 -o output.jpg \
 
 ### 📄 输出
 
+**单视频模式**
+
 - `output.jpg` - 频闪轨迹图像
-- `output.json` - 轨迹数据，包含每帧信息：
+- `output.json` - 轨迹数据（每帧一条的数组）：
   ```json
   [
     {
@@ -150,6 +167,19 @@ python video2traj.py input.mp4 -o output.jpg \
   ]
   ```
 
+**多视频模式**（使用 `--config` 时）
+
+- 图像路径由配置中 `output.image` 指定（如 `result.png`）
+- JSON 路径由 `output.trajectory_json` 指定（如 `result.json`），结构：
+  ```json
+  {
+    "videos": [
+      { "video": "video1.mp4", "trajectory": [ { "frame": 10, "cx": 100, "cy": 80, "bbox": [...], "area": 1200 } ] },
+      { "video": "video2.mp4", "trajectory": [ ... ] }
+    ]
+  }
+  ```
+
 ### 🎓 致谢
 
 本项目受 demolen 的 [videoStrobe](https://github.com/demolen/videoStrobe) 启发。我们对原始概念和实现表示感谢。
@@ -160,15 +190,16 @@ MIT 许可证 - 欢迎在您的研究和项目中使用！
 
 ### 🧪 测试
 
-运行测试套件以验证安装：
+在项目目录下用 uv 运行测试套件以验证安装：
 
 ```bash
-# 运行所有测试
-python tests/run_all_tests.py
+# 运行所有测试（单视频、回归、多视频）
+uv run python tests/run_all_tests.py
 
 # 运行特定测试
-python tests/test_synthetic.py
-python tests/test_regression.py
+uv run python tests/test_synthetic.py
+uv run python tests/test_regression.py
+uv run python tests/test_multi_video.py
 ```
 
 详细测试文档见 [tests/README.md](tests/README.md)。

@@ -42,15 +42,17 @@ git clone https://github.com/yourusername/video2traj.git
 cd video2traj
 
 # Install dependencies
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 🚀 Quick Start
 
+**Single-video mode** (use `--input` and `--output`):
+
 **Try with Example Video**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
 ```
 
 ![Example output](examples/example_out.jpg)
@@ -60,19 +62,19 @@ uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg
 **Uniform Sampling (Default)**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
 ```
 
 **Manual Frame Selection**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
 ```
 
 **Interactive Mode in Video Player**
 
 ```bash
-uv run python video2traj.py examples/example_in.mp4 -o examples/example_out.jpg --interactive
+uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --interactive
 ```
 
 Interactive Controls:
@@ -84,6 +86,19 @@ Interactive Controls:
 - Drag trackbar - Seek to frame
 - `P` - Open/close preview of selected frames
 - `ESC/Q` - Confirm and exit
+
+**Multi-video mode** (merge trajectories from multiple videos onto one image; requires a config file):
+
+```bash
+# 1. Copy the template and edit paths/parameters
+cp config_template.yaml my_config.yaml
+
+# 2. Run with config
+uv run python video2traj.py --config my_config.yaml
+```
+
+Config format (YAML or JSON): list videos under `videos` with `path`, `mode` (`manual` / `uniform` / `interactive`), and mode-specific fields (`frames`, `num_frames`, `start_frame`, `end_frame`). Use `defaults` for shared options. Output paths go under `output.image` and `output.trajectory_json`. See [config_template.yaml](config_template.yaml) for a full example.
+
 
 ### ⚙️ Advanced Parameters
 
@@ -126,10 +141,10 @@ Interactive Controls:
 --soft-edge 9                   # Soft edge kernel (must be odd, 0=disabled)
 ```
 
-**Full Example**
+**Full Example (single video)**
 
 ```bash
-python video2traj.py input.mp4 -o output.jpg \
+uv run python video2traj.py --input input.mp4 -o output.jpg \
   --num-frames 50 \
   --diff-threshold 30 \
   --soft-edge 11 \
@@ -139,8 +154,10 @@ python video2traj.py input.mp4 -o output.jpg \
 
 ### 📄 Output
 
+**Single-video mode**
+
 - `output.jpg` - Stroboscopic trajectory image
-- `output.json` - Trajectory data with per-frame information:
+- `output.json` - Trajectory data (array of per-frame entries):
   ```json
   [
     {
@@ -153,6 +170,19 @@ python video2traj.py input.mp4 -o output.jpg \
   ]
   ```
 
+**Multi-video mode** (when using `--config`)
+
+- Image path from `output.image` in config (e.g. `result.png`)
+- JSON path from `output.trajectory_json` (e.g. `result.json`), structure:
+  ```json
+  {
+    "videos": [
+      { "video": "video1.mp4", "trajectory": [ { "frame": 10, "cx": 100, "cy": 80, "bbox": [...], "area": 1200 } ] },
+      { "video": "video2.mp4", "trajectory": [ ... ] }
+    ]
+  }
+  ```
+
 ### 🎓 Credits
 
 This project was inspired by [videoStrobe](https://github.com/demolen/videoStrobe) by demolen. We extend our gratitude for the original concept and implementation.
@@ -163,15 +193,16 @@ MIT License - feel free to use this in your research and projects!
 
 ### 🧪 Testing
 
-Run the test suite to verify installation:
+Run the test suite to verify installation (with uv in project directory):
 
 ```bash
-# Run all tests
-python tests/run_all_tests.py
+# Run all tests (single-video, regression, multi-video)
+uv run python tests/run_all_tests.py
 
 # Run specific test
-python tests/test_synthetic.py
-python tests/test_regression.py
+uv run python tests/test_synthetic.py
+uv run python tests/test_regression.py
+uv run python tests/test_multi_video.py
 ```
 
 See [tests/README.md](tests/README.md) for detailed testing documentation.
