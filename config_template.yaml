@@ -13,17 +13,6 @@ videos:
     mode: "uniform"
     num_frames: 20
 
-  # Uniform sampling within range [start_frame, end_frame) | 在指定区间内均匀采样
-  # - path: "examples/example_2.mp4"
-  #   mode: "uniform"
-  #   num_frames: 10
-  #   start_frame: 50
-  #   end_frame: 300  # null = to end of video | null = 到视频结尾
-
-  # Interactive: GUI frame selection at runtime | 交互模式：运行时 GUI 选帧
-  # - path: "examples/example_1.mp4"
-  #   mode: "interactive"
-
 # Defaults when not specified per video | 每个视频未指定时使用的默认值
 defaults:
   mode: "uniform"
@@ -37,8 +26,8 @@ render:
   alpha_end: 1.0
   blur_size: 5
   diff_threshold: 20
-  use_gradient: true
   grad_threshold: 15
+  gradient_region: 0.01
   soft_edge: 0
   close_kernel_size: 21
   open_kernel_size: 5

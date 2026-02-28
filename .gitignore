@@ -136,6 +136,7 @@ ipython_config.py
 # Temporary folders
 diary/tmp/
 **/tmp/
+debug
 
 # ===========================
 # MATLAB
@@ -183,3 +184,4 @@ docs/_build/
 *.temp
 *~
 .directory
+visualize_trajectory.py

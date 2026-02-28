@@ -52,7 +52,7 @@ uv pip install -r requirements.txt
 **Try with Example Video**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg
 ```
 
 ![Example output](examples/example_single.jpg)
@@ -62,19 +62,19 @@ uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_
 **Uniform Sampling (Default)**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --num-frames 30
 ```
 
 **Manual Frame Selection**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --manual "30,60,90,120"
 ```
 
 **Interactive Mode in Video Player**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --interactive
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --interactive
 ```
 
 Interactive Controls:
@@ -137,8 +137,8 @@ Config format (YAML or JSON): list videos under `videos` with `path`, `mode` (`m
 
 ```bash
 --diff-threshold 20             # LAB difference threshold (0=auto OTSU)
---no-gradient                   # Disable gradient-based segmentation
 --grad-threshold 15             # Gradient difference threshold
+--gradient-region 0.02          # Fraction of min(w,h) to expand color mask for gradient ROI
 ```
 
 **Mask Refinement**

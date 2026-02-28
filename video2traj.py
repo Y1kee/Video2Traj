@@ -1,6 +1,6 @@
+import os
 import cv2
 import numpy as np
-import math
 from typing import List, Tuple, Optional, Dict, Any
 from tqdm import tqdm
 from screeninfo import get_monitors
@@ -535,9 +535,10 @@ def render_trajectory(
     open_kernel_size: int = 5,
     min_motion_area: int = 100,
     diff_threshold: int = 20,
-    use_gradient: bool = True,
     grad_threshold: int = 15,
-    soft_edge_size: int = 0
+    gradient_region: float = 0.01,
+    soft_edge_size: int = 0,
+    save_mask_path: Optional[str] = None,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
     """Renders a stroboscopic trajectory image via per-frame alpha compositing. | 通过逐帧 Alpha 合成渲染残影轨迹图。
 
@@ -556,8 +557,8 @@ def render_trajectory(
         open_kernel_size (int, optional): Kernel size for morphological opening. Defaults to 5. | 开运算核大小，默认为 5。
         min_motion_area (int, optional): Minimum mask area. Defaults to 100. | 最小掩模面积，默认为 100。
         diff_threshold (int, optional): Fixed threshold for LAB diff. 0 = fallback to OTSU. Defaults to 20. | LAB 差分固定阈值，0 则回退 OTSU，默认为 20。
-        use_gradient (bool, optional): Enable gradient-based diff as auxiliary mask. Defaults to True. | 启用梯度差分辅助路径，默认开启。
         grad_threshold (int, optional): Threshold for gradient diff. Defaults to 15. | 梯度差分阈值，默认为 15。
+        gradient_region (float, optional): Fraction of min(w,h) to expand color mask for gradient ROI. Defaults to 0.01. | 颜色 mask 膨胀比例，梯度仅在此区域内生效，默认 0.01。
         soft_edge_size (int, optional): Gaussian blur kernel size for soft mask edges. 0 = disabled (binary mask). Defaults to 0. | 软边缘高斯核大小，0 为关闭，默认为 0。
 
     Returns:
@@ -580,14 +581,12 @@ def render_trajectory(
 
     # Pre-compute background representations outside the frame loop | 在帧循环外预计算背景表示
     bg_lab = cv2.cvtColor(bg_image, cv2.COLOR_BGR2LAB)
-    bg_gray: Optional[np.ndarray] = None
-    bg_grad: Optional[np.ndarray] = None
-    if use_gradient or diff_threshold == 0:
-        bg_gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
-    if use_gradient:
-        bg_grad = cv2.magnitude(
-            cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
-            cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
+    bg_gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
+    bg_grad = cv2.magnitude(
+        cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
+        cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
+    expand_px = max(1, int(gradient_region * min(height, width)))
+    grad_region_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
     
     # 3. Read frames: seek for sparse keyframes, sequential for dense | 读取帧：稀疏关键帧用 seek，密集帧用顺序读取
     cap = _open_video(video_path)
@@ -602,6 +601,10 @@ def render_trajectory(
     print(f"Rendering {num_frames} frames (range {sorted_indices[0]}..{max_frame_needed}), "
           f"strategy={'seek' if use_seek else 'sequential'}...")
 
+    save_mask_dir: Optional[str] = save_mask_path
+    video_stem = os.path.splitext(os.path.basename(video_path))[0] if save_mask_dir else ""
+    saved_mask_count: List[int] = [0]
+
     def _process_frame(frame: np.ndarray, frame_idx: int, rank: int) -> None:
         """Process a single keyframe: diff → mask → alpha composite → trajectory extract. | 处理单个关键帧：差分 → 掩模 → Alpha 合成 → 轨迹提取。"""
         # --- LAB color diff (primary path) | LAB 颜色差分（主路径） ---
@@ -614,10 +617,11 @@ def render_trajectory(
         else:
             _, mask_color = cv2.threshold(diff_max, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        raw_mask = mask_color
+        mask_color_refined = refine_motion_mask(mask_color, min_motion_area, blur_size,
+                                                close_kernel_size, open_kernel_size)
 
-        # --- Gradient diff (auxiliary path) | 梯度差分（辅助路径） ---
-        if use_gradient:
+        # --- Gradient diff (restricted to color mask neighborhood) | 梯度差分（仅于颜色 mask 邻域内） ---
+        if cv2.countNonZero(mask_color_refined) > 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             grad_frame = cv2.magnitude(
                 cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3),
@@ -625,10 +629,25 @@ def render_trajectory(
             diff_grad = np.abs(grad_frame - bg_grad)
             diff_grad_u8 = np.clip(diff_grad, 0, 255).astype(np.uint8)
             _, mask_grad = cv2.threshold(diff_grad_u8, grad_threshold, 255, cv2.THRESH_BINARY)
-            raw_mask = cv2.bitwise_or(raw_mask, mask_grad)
+            color_region = cv2.dilate(mask_color_refined, grad_region_kernel)
+            mask_grad_restricted = cv2.bitwise_and(mask_grad, color_region)
+            raw_mask = cv2.bitwise_or(mask_color_refined, mask_grad_restricted)
+        else:
+            raw_mask = mask_color_refined
 
         refined_mask = refine_motion_mask(raw_mask, min_motion_area, blur_size,
                                           close_kernel_size, open_kernel_size)
+
+        # Debug: save all per-frame refined masks | 调试：保存每帧 refined mask
+        if save_mask_dir:
+            out_dir = save_mask_dir.rstrip("/\\")
+            if out_dir.lower().endswith((".png", ".jpg", ".jpeg")):
+                out_dir = os.path.splitext(out_dir)[0]
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{video_stem}_frame_{frame_idx:06d}.png")
+            cv2.imwrite(out_path, refined_mask)
+            saved_mask_count[0] += 1
 
         # Per-frame alpha compositing | 逐帧 Alpha 合成
         alpha = alpha_start + (alpha_end - alpha_start) * (rank / max(num_frames - 1, 1))
@@ -683,6 +702,11 @@ def render_trajectory(
         pbar.close()
 
     cap.release()
+    if save_mask_dir and saved_mask_count[0] > 0:
+        out_dir = save_mask_dir.rstrip("/\\")
+        if out_dir.lower().endswith((".png", ".jpg", ".jpeg")):
+            out_dir = os.path.splitext(out_dir)[0]
+        print(f"Masks saved: {saved_mask_count[0]} files in {out_dir}")
 
     return np.clip(result, 0, 255).astype(np.uint8), trajectory_data
 
@@ -698,9 +722,10 @@ def render_multi_video_trajectory(
     open_kernel_size: int = 5,
     min_motion_area: int = 100,
     diff_threshold: int = 20,
-    use_gradient: bool = True,
     grad_threshold: int = 15,
+    gradient_region: float = 0.01,
     soft_edge_size: int = 0,
+    save_mask_path: Optional[str] = None,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
     """Renders trajectory from multiple videos onto a single canvas. | 将多个视频的轨迹渲染到同一画布。
 
@@ -719,8 +744,8 @@ def render_multi_video_trajectory(
         open_kernel_size (int, optional): Morphological opening kernel size. Defaults to 5. | 开运算核大小，默认 5。
         min_motion_area (int, optional): Minimum motion mask area. Defaults to 100. | 最小运动掩模面积，默认 100。
         diff_threshold (int, optional): LAB diff threshold (0 = OTSU). Defaults to 20. | LAB 差分阈值，0 为 OTSU，默认 20。
-        use_gradient (bool, optional): Use gradient-based diff. Defaults to True. | 是否使用梯度差分，默认 True。
         grad_threshold (int, optional): Gradient diff threshold. Defaults to 15. | 梯度差分阈值，默认 15。
+        gradient_region (float, optional): Fraction of min(w,h) to expand color mask for gradient ROI. Defaults to 0.01. | 颜色 mask 膨胀比例，梯度仅在此区域内生效，默认 0.01。
         soft_edge_size (int, optional): Soft edge kernel size (0 = disabled). Defaults to 0. | 软边缘核大小，0 为关闭，默认 0。
 
     Returns:
@@ -734,14 +759,12 @@ def render_multi_video_trajectory(
 
     # Pre-compute background representations | 预计算背景表示
     bg_lab = cv2.cvtColor(bg_image, cv2.COLOR_BGR2LAB)
-    bg_gray: Optional[np.ndarray] = None
-    bg_grad: Optional[np.ndarray] = None
-    if use_gradient or diff_threshold == 0:
-        bg_gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
-    if use_gradient:
-        bg_grad = cv2.magnitude(
-            cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
-            cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
+    bg_gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
+    bg_grad = cv2.magnitude(
+        cv2.Sobel(bg_gray, cv2.CV_32F, 1, 0, ksize=3),
+        cv2.Sobel(bg_gray, cv2.CV_32F, 0, 1, ksize=3))
+    expand_px = max(1, int(gradient_region * min(height, width)))
+    grad_region_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
 
     for v_idx, (video_path, frame_indices) in enumerate(zip(video_paths, frame_indices_per_video)):
         sorted_indices = sorted(set(frame_indices))
@@ -765,6 +788,10 @@ def render_multi_video_trajectory(
         print(f"Processing video {v_idx + 1}/{len(video_paths)}: {video_path} ({num_frames} frames, "
               f"strategy={'seek' if use_seek else 'sequential'})...")
 
+        save_mask_dir: Optional[str] = save_mask_path
+        video_stem = os.path.splitext(os.path.basename(video_path))[0] if save_mask_dir else ""
+        saved_mask_count: List[int] = [0]
+
         def _process_frame(frame: np.ndarray, frame_idx: int, rank: int) -> None:
             frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
             diff_lab = cv2.absdiff(frame_lab, bg_lab)
@@ -773,8 +800,9 @@ def render_multi_video_trajectory(
                 _, mask_color = cv2.threshold(diff_max, diff_threshold, 255, cv2.THRESH_BINARY)
             else:
                 _, mask_color = cv2.threshold(diff_max, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            raw_mask = mask_color
-            if use_gradient and bg_gray is not None and bg_grad is not None:
+            mask_color_refined = refine_motion_mask(
+                mask_color, min_motion_area, blur_size, close_kernel_size, open_kernel_size)
+            if cv2.countNonZero(mask_color_refined) > 0:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 grad_frame = cv2.magnitude(
                     cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3),
@@ -782,9 +810,22 @@ def render_multi_video_trajectory(
                 diff_grad = np.abs(grad_frame - bg_grad)
                 diff_grad_u8 = np.clip(diff_grad, 0, 255).astype(np.uint8)
                 _, mask_grad = cv2.threshold(diff_grad_u8, grad_threshold, 255, cv2.THRESH_BINARY)
-                raw_mask = cv2.bitwise_or(raw_mask, mask_grad)
+                color_region = cv2.dilate(mask_color_refined, grad_region_kernel)
+                mask_grad_restricted = cv2.bitwise_and(mask_grad, color_region)
+                raw_mask = cv2.bitwise_or(mask_color_refined, mask_grad_restricted)
+            else:
+                raw_mask = mask_color_refined
             refined_mask = refine_motion_mask(
                 raw_mask, min_motion_area, blur_size, close_kernel_size, open_kernel_size)
+            if save_mask_dir:
+                out_dir = save_mask_dir.rstrip("/\\")
+                if out_dir.lower().endswith((".png", ".jpg", ".jpeg")):
+                    out_dir = os.path.splitext(out_dir)[0]
+                if not os.path.exists(out_dir):
+                    os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, f"{video_stem}_v{v_idx:02d}_frame_{frame_idx:06d}.png")
+                cv2.imwrite(out_path, refined_mask)
+                saved_mask_count[0] += 1
             # Per-video alpha gradient: first frame = alpha_start, last = alpha_end | 每视频独立 alpha 渐变
             alpha = alpha_start + (alpha_end - alpha_start) * (rank / max(num_frames - 1, 1))
             if soft_edge_size > 0:
@@ -835,6 +876,11 @@ def render_multi_video_trajectory(
                 current_frame_idx += 1
             pbar.close()
         cap.release()
+        if save_mask_dir and saved_mask_count[0] > 0:
+            out_dir = save_mask_dir.rstrip("/\\")
+            if out_dir.lower().endswith((".png", ".jpg", ".jpeg")):
+                out_dir = os.path.splitext(out_dir)[0]
+            print(f"Masks saved: {saved_mask_count[0]} files for {video_stem} in {out_dir}")
         grouped_trajectory_data.append({"video": video_path, "trajectory": video_trajectory})
 
     return np.clip(canvas, 0, 255).astype(np.uint8), grouped_trajectory_data
@@ -915,20 +961,22 @@ if __name__ == "__main__":
                         help="Opacity of latest shadow.")
     parser.add_argument("--blur-size", type=int, default=5,
                         help="Gaussian blur kernel size (must be odd).")
-    parser.add_argument("--close-kernel-size", type=int, default=21,
+    parser.add_argument("--close-kernel-size", type=int, default=15,
                         help="Morphological closing kernel size.")
-    parser.add_argument("--open-kernel-size", type=int, default=5,
+    parser.add_argument("--open-kernel-size", type=int, default=21,
                         help="Morphological opening kernel size.")
     parser.add_argument("--min-motion-area", type=int, default=100,
                         help="Minimum motion mask area.")
     parser.add_argument("--diff-threshold", type=int, default=20,
                         help="LAB diff threshold (0 = fallback to OTSU).")
-    parser.add_argument("--no-gradient", action="store_true",
-                        help="Disable gradient-based segmentation (enabled by default).")
     parser.add_argument("--grad-threshold", type=int, default=15,
                         help="Gradient difference threshold.")
+    parser.add_argument("--gradient-region", type=float, default=0.02,
+                        help="Fraction of min(w,h) to expand color mask for gradient ROI (default: 0.01).")
     parser.add_argument("--soft-edge", type=int, default=0,
                         help="Soft edge kernel size (0 = disabled, must be odd if > 0).")
+    parser.add_argument("--save-mask", type=str, default=None, metavar="DIR",
+                        help="Directory to save all per-frame refined masks (grayscale PNGs).")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--uniform", action="store_true",
@@ -962,7 +1010,7 @@ if __name__ == "__main__":
         render_cli_flags = [
             "--alpha-start", "--alpha-end", "--blur-size", "--diff-threshold",
             "--close-kernel-size", "--open-kernel-size", "--min-motion-area",
-            "--no-gradient", "--grad-threshold", "--soft-edge",
+            "--grad-threshold", "--gradient-region", "--soft-edge",
             "--num-frames", "--start-frame", "--end-frame", "--num-samples",
         ]
         argv_str = " ".join(sys.argv)
@@ -1038,9 +1086,10 @@ if __name__ == "__main__":
             open_kernel_size=render_config.get("open_kernel_size", 5),
             min_motion_area=render_config.get("min_motion_area", 100),
             diff_threshold=render_config.get("diff_threshold", 20),
-            use_gradient=render_config.get("use_gradient", True),
             grad_threshold=render_config.get("grad_threshold", 15),
+            gradient_region=render_config.get("gradient_region", 0.01),
             soft_edge_size=render_config.get("soft_edge", 0),
+            save_mask_path=args.save_mask,
         )
 
         output_image = output_config.get("image", "result.png")
@@ -1110,9 +1159,10 @@ if __name__ == "__main__":
         open_kernel_size=args.open_kernel_size,
         min_motion_area=args.min_motion_area,
         diff_threshold=args.diff_threshold,
-        use_gradient=not args.no_gradient,
         grad_threshold=args.grad_threshold,
+        gradient_region=args.gradient_region,
         soft_edge_size=args.soft_edge,
+        save_mask_path=args.save_mask,
     )
 
     # --- Step 4: Save outputs | 步骤 4：保存输出 ---

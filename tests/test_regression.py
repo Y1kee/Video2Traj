@@ -106,6 +106,7 @@ def test_regression():
             'close_kernel_size': 21,
             'open_kernel_size': 5,
             'min_motion_area': 100,
+            'gradient_region': 0.01,
         }
         
         print(f"\n[2/6] Fixed parameters | 固定参数:")
@@ -142,6 +143,7 @@ def test_regression():
                 close_kernel_size=FIXED_PARAMS['close_kernel_size'],
                 open_kernel_size=FIXED_PARAMS['open_kernel_size'],
                 min_motion_area=FIXED_PARAMS['min_motion_area'],
+                gradient_region=FIXED_PARAMS['gradient_region'],
             )
             
             # Compute hashes | 计算哈希

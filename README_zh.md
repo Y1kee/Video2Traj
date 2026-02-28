@@ -49,7 +49,7 @@ uv pip install -r requirements.txt
 **使用示例视频试用**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg
 ```
 
 ![示例输出](examples/example_single.jpg)
@@ -59,19 +59,19 @@ uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_
 **均匀采样（默认）**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --num-frames 30
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --num-frames 30
 ```
 
 **手动选帧**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --manual "30,60,90,120"
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --manual "30,60,90,120"
 ```
 
 **播放器交互模式**
 
 ```bash
-uv run python video2traj.py --input examples/example_in.mp4 -o examples/example_out.jpg --interactive
+uv run python video2traj.py --input examples/example_1.mp4 -o examples/example_single.jpg --interactive
 ```
 
 交互操控键：
@@ -134,8 +134,8 @@ uv run python video2traj.py --config my_config.yaml
 
 ```bash
 --diff-threshold 20             # LAB 差分阈值 (0=自动 OTSU)
---no-gradient                   # 禁用梯度辅助分割
 --grad-threshold 15             # 梯度差分阈值
+--gradient-region 0.02          # 颜色 mask 膨胀比例，梯度仅在此邻域内生效
 ```
 
 **掩模细化**
